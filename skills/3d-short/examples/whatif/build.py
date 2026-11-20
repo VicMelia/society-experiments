@@ -610,6 +610,10 @@ if MODE == "preview":
     for fr in frames:
         s3d.preview_still(os.path.join(out, f"f{fr:04d}.png"), frame=fr, scale=40)
     s3d.export_markers(os.path.join(WORK, "render.sfx.json"))
+elif MODE == "still":
+    s3d.qa_gate(QA, abort=False)
+    fr = int(os.environ.get("FRAME", END // 2))
+    s3d.preview_still(os.path.join(WORK, f"still_f{fr:04d}.png"), frame=fr, scale=100, samples=sc.eevee.taa_render_samples)
 else:
     if MODE == "half":
         sc.eevee.taa_render_samples = 16

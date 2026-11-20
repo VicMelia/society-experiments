@@ -1,8 +1,10 @@
 """Example build with a character: "How a hole becomes a bunker" — timed to the narration through beats.json.
 
-  blender --background --python build.py -- <workdir> [preview|half|full]
+  blender --background --python build.py -- <workdir> [preview|still|half|full]
 <workdir> must contain beats.json (beats.py). Output: <workdir>/render.mp4 + render.sfx.json (SFX cues),
-preview mode writes <workdir>/preview/beat_N.png stills instead.
+preview mode writes <workdir>/preview/f####.png stills instead; still mode renders ONE frame
+(FRAME=<n>, default: middle) at final quality to <workdir>/still_f####.png; TOON=1 converts the scene
+to the painted toon look (toon.py) first.
 """
 import math
 import os
@@ -263,6 +265,13 @@ if MODE == "preview":
     for fr in frames:
         s3d.preview_still(os.path.join(out, f"f{fr:04d}.png"), frame=fr, scale=40)
     s3d.export_markers(os.path.join(WORK, "render.sfx.json"))
+elif MODE == "still":
+    fr = int(os.environ.get("FRAME", END // 2))
+    if os.environ.get("TOON") == "1":          # painted toon look (toon.py) instead of photo textures
+        import toon
+        print("TOON converted:", len(toon.toonify()), "materials")
+        toon.setup(sc, world=None, haze=None)  # keep the HDRI sky; no room haze outdoors
+    s3d.preview_still(os.path.join(WORK, f"still_f{fr:04d}.png"), frame=fr, scale=100, samples=sc.eevee.taa_render_samples)
 else:
     if MODE == "half":
         sc.eevee.taa_render_samples = 16

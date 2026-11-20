@@ -60,6 +60,7 @@ For a "what if": one zone per kind of view (real place, X-ray void, a ward/roomâ
 ```bash
 BLENDER=$(python3 ${CLAUDE_SKILL_DIR}/scripts/find_blender.py)
 "$BLENDER" --background --python build.py -- . preview      # stills at key moments -> preview/f####.png + "QA:" lines
+FRAME=240 "$BLENDER" --background --python build.py -- . still   # ONE frame at final quality (100%, full samples) -> still_f0240.png
 uv run --with pillow --with numpy python ${CLAUDE_SKILL_DIR}/scripts/qa.py preview/   # magenta/black frames + qa_sheet.jpg
 ```
 Three layers of checks, all must be clean:

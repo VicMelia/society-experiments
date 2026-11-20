@@ -1,6 +1,7 @@
 """Example build: "How a hole becomes a pool" — timed to the voiceover through beats.json.
 
-  blender --background --python build.py -- <workdir> [preview|full]
+  blender --background --python build.py -- <workdir> [preview|still|full]
+  still: ONE frame at final quality (FRAME=<n>, default: middle) -> <workdir>/still_f####.png
 <workdir> must contain beats.json (from beats.py). Output: <workdir>/render.mp4 (+ render.sfx.json)
 """
 import os
@@ -116,5 +117,9 @@ s3d.cam_drift(cam, s3d.when(B, 7, "congratulations"), END, amount=0.8)
 if MODE == "preview":
     for i, b in enumerate(B):
         s3d.preview_still(os.path.join(WORK, f"prev_{i}.png"), frame=(b["fs"] + b["fe"]) // 2, scale=35)
+elif MODE == "still":
+    sc = bpy.context.scene
+    fr = int(os.environ.get("FRAME", END // 2))
+    s3d.preview_still(os.path.join(WORK, f"still_f{fr:04d}.png"), frame=fr, scale=100, samples=sc.eevee.taa_render_samples)
 else:
     s3d.render_mp4(os.path.join(WORK, "render.mp4"), scale=100 if MODE == "full" else 50)

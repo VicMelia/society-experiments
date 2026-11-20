@@ -45,6 +45,29 @@ With the Blender MCP connected you can run the same code live through `execute_b
 | materials: `mat(name, rgb, rough, metal, noise)`, `mat_soil/concrete/metal_white/steel/wood/water`, `mat_emit` | |
 | `PAL` | the palette (grass, soil, clay, concrete, water, ...) |
 
+## Painted toon look (`toon.py`)
+Flat illustrated style instead of photo textures: 4-tone flat shading (mauve shadows, warm lights), Sobel lines
+from the depth/normal passes drawn as a darker shade of the colour underneath (wobble, pressure that swells/thins/
+breaks the stroke, fainter far away), Kuwahara painterly filter, lamp glow, paper grain and vignette.
+`setup(lines="freestyle")` gives dark Freestyle strokes instead. Full example: `examples/office/build.py`
+(`-- <workdir>` → `office.png`; `--post 0` raw shading, `--character 1` adds the simple figure).
+Tune the lines in `toon._sobel_lines` (`depth_edge`, `normal_edge`, `width`, `darken`, `wobble`). Raise `depth_edge`
+if surfaces seen at a grazing angle (ceilings, long floors) get smudgy false lines.
+- Existing s3d scenes: `toon.toonify()` converts Principled/Diffuse materials in place (textures, tints and
+  alpha cut-outs kept), then `toon.setup(sc, world=None, haze=None)` keeps the HDRI sky. Try it with
+  `TOON=1 FRAME=240 blender -b -P examples/bunker/build.py -- <workdir> still`. Photo textures stay detailed
+  (painted-over-photo look); for the flat look build with `toon.material` colours instead.
+- Video: the look lives in the compositor, so `s3d.render_mp4` gets it on every frame; `setup(boil=2)` changes
+  the line noise every 2 frames so lines "boil" like hand-drawn animation instead of sliding (0 = fixed).
+- Contact shadows: `AO_STRENGTH`, `AO_RANGE`, `CONTACT` in toon.py (EEVEE AO is faint; it is stretched).
+  `material(..., flat=0.5)` for big walls next to a lamp: broad bands instead of rings.
+- Depth haze towards `haze_color` (`setup(haze=(from_m, to_m, max))`, None outdoors).
+- `toon.material("#hex")` per surface (`checker=(a, b)` for tiled floors, `emission="#hex"` for lamps);
+  `toon.glow_material()` + `toon.no_lines(obj)` for light cones — they render in their own layer, otherwise
+  Freestyle treats the cone as solid and drops the outlines of everything inside it.
+- `toon.setup(scene, world="#8a7898", world_strength=0.55)` after building, then `toon.render_still(path)`.
+- Colours are given as sRGB hex; the Freestyle line colour is scene-linear (`toon.LINE`).
+
 ## Recipes
 - **Container / room underground**: `hollow_box("Container", (4.7, 2.5, 2.5), loc=(0, 1.32, -1.95), mat=s3d.tex("corrugated_iron_02", tile=1.2, tint=(1.55, 0.62, 0.32)))`, `drop_in(..., sfx="heavy")` on "container". Children of a dropped group appear with it; cutters stay hidden (`obj["s3d_always_hidden"] = 1` for your own cutters).
 - **Hatch in a roof**: boolean cutter parented to the container, scale 0 → 1 on "hatch"; lid box rotates open. See `examples/bunker/build.py`.
