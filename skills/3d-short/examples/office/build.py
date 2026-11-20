@@ -1,6 +1,6 @@
 """Example: painted toon office (basement storeroom) as one still, in the toon.py style.
 
-  blender --background --python build.py -- <workdir> [--lines 0] [--line-style sobel|freestyle] [--character 1] [--post 0]
+  blender --background --python build.py -- <workdir> [--lines 0] [--line-style object|sobel] [--character 1] [--post 0]
 Output: <workdir>/office.png (1080x1920). --post 0 renders only the raw toon shading (no lines, painterly
 filter, glow or finish); --lines 0 keeps everything but the outline — handy to judge each layer on its own.
 """
@@ -32,7 +32,7 @@ WORK = argv[0] if argv else "."
 OPT = dict(zip(argv[1::2], argv[2::2]))
 POST = OPT.get("--post", "1") != "0"
 LINES = OPT.get("--lines", "1") != "0"
-LINE_STYLE = OPT.get("--line-style", "sobel")       # sobel | freestyle
+LINE_STYLE = OPT.get("--line-style", "object")      # object (geometric) | sobel (screen space)
 CHARACTER = OPT.get("--character", "0") != "0"
 
 # ---------------------------------------------------------------- palette (from the reference)

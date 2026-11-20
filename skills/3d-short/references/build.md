@@ -46,19 +46,22 @@ With the Blender MCP connected you can run the same code live through `execute_b
 | `PAL` | the palette (grass, soil, clay, concrete, water, ...) |
 
 ## Painted toon look (`toon.py`)
-Flat illustrated style instead of photo textures: 4-tone flat shading (mauve shadows, warm lights), Sobel lines
-from the depth/normal passes drawn as a darker shade of the colour underneath (wobble, pressure that swells/thins/
-breaks the stroke, fainter far away), Kuwahara painterly filter, lamp glow, paper grain and vignette.
-`setup(lines="freestyle")` gives dark Freestyle strokes instead. Full example: `examples/office/build.py`
-(`-- <workdir>` → `office.png`; `--post 0` raw shading, `--character 1` adds the simple figure).
-Tune the lines in `toon._sobel_lines` (`depth_edge`, `normal_edge`, `width`, `darken`, `wobble`). Raise `depth_edge`
-if surfaces seen at a grazing angle (ceilings, long floors) get smudgy false lines.
+Flat illustrated style instead of photo textures: 4-tone flat shading (mauve shadows, warm lights), a subtle
+geometric outline (silhouettes, borders, creases from the meshes, drawn inside each object in a darker, richer
+tone of that object's own lit colour, tapered, thinner far away), Kuwahara painterly filter, lamp glow, paper
+grain and vignette. Full example: `examples/office/build.py` (`-- <workdir>` → `office.png`; `--post 0` raw
+shading, `--character 1` adds the simple figure, `--line-style sobel` for screen-space sketch lines).
+Tune the outline with `toon.OUTLINE_WIDTH / _TAPER / _FAR / _VALUE / _SAT / _OPACITY`. Prefer it over "sobel":
+screen-space edges guess from pixels (false lines on grazing surfaces, noise reads as an image filter); the
+geometric one is exact and does not swim in animation. It needs real geometry: a crease only appears where the
+mesh has a sharp edge (> ~43° between faces), smooth-shaded curves only get their silhouette.
 - Existing s3d scenes: `toon.toonify()` converts Principled/Diffuse materials in place (textures, tints and
   alpha cut-outs kept), then `toon.setup(sc, world=None, haze=None)` keeps the HDRI sky. Try it with
   `TOON=1 FRAME=240 blender -b -P examples/bunker/build.py -- <workdir> still`. Photo textures stay detailed
   (painted-over-photo look); for the flat look build with `toon.material` colours instead.
-- Video: the look lives in the compositor, so `s3d.render_mp4` gets it on every frame; `setup(boil=2)` changes
-  the line noise every 2 frames so lines "boil" like hand-drawn animation instead of sliding (0 = fixed).
+- Video: the look lives in the compositor, so `s3d.render_mp4` gets it on every frame. The geometric outline is
+  stable by itself; with `lines="sobel"`, `setup(boil=2)` changes its noise every 2 frames so it "boils" like
+  hand-drawn animation instead of sliding (0 = fixed).
 - Contact shadows: `AO_STRENGTH`, `AO_RANGE`, `CONTACT` in toon.py (EEVEE AO is faint; it is stretched).
   `material(..., flat=0.5)` for big walls next to a lamp: broad bands instead of rings.
 - Depth haze towards `haze_color` (`setup(haze=(from_m, to_m, max))`, None outdoors).

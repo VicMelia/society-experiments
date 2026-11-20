@@ -11,10 +11,13 @@ How the look is made
 - Flat colours: each material quantises the light it receives into 4 fixed tones (ColorRamp CONSTANT),
   tinted mauve in shadow and warm in light. Ambient occlusion goes into the light *before* the ramp, so
   contact shadows (box on floor, cabinet against wall) are flat patches too.
-- Lines: Sobel on the Depth and Normal passes, drawn as a darker shade of the pixel underneath (never black).
-  Hand tremor, pressure that swells/thins/breaks the stroke, fainter with distance. With boil=N the noise
-  changes every N frames, so in a video the lines "boil" like hand-drawn animation instead of sliding
-  over the moving picture.
+- Lines (default "object"): geometric outline computed from the meshes and the camera (Freestyle:
+  silhouettes, borders, creases), so it is exact and stable in animation. Strokes lie INSIDE the object
+  they outline and are coloured with that object's own lit colour, darker (HSV value x0.62) and a bit
+  richer (saturation x1.18): a subtle line in the object's tone, never black. Brush taper at both ends,
+  thinner with distance, no noise. Tune with the OUTLINE_* constants.
+  Alternative lines="sobel": screen-space edges from the depth/normal passes, sketchier; boil=N changes
+  their noise every N frames so they "boil" in a video instead of sliding.
 - Painted fill: compositor Kuwahara groups colours into brush-like patches; depth haze lifts the back of
   the scene towards `haze_color`; glare puts a halo around lamps (emission strength > 1.2).
 - Finish (compositor, so every video frame gets it): paper grain, faint brush streaks, vignette.
@@ -32,7 +35,6 @@ AO_DISTANCE = 0.9       # m: how far contact shadows reach
 AO_STRENGTH = 0.7       # 0 = off, 1 = full occlusion darkens to black before the ramp
 AO_RANGE = (0.78, 0.98)  # raw AO -> full occlusion .. none (EEVEE: open floor ~1.0, contacts ~0.83-0.9)
 CONTACT = (0.62, 0.55, 0.70)  # flat contact-shadow multiplier (cool mauve) where AO is past half the range
-LINE = (0.030, 0.017, 0.020)   # Freestyle only (scene-linear): ~#302227 on screen
 NO_LINES = "toon_overlay"       # glow cones etc.: own view layer, no outline, composited on top
 OVERLAY_LAYER = "toon_overlay"
 LINES_LAYER = "toon_lines"
@@ -259,19 +261,31 @@ def no_lines(obj):
     obj.visible_shadow = False
 
 
-# ---------------------------------------------------------------- Freestyle lines (lines="freestyle")
+# ---------------------------------------------------------------- object-space outline (lines="object")
+OUTLINE_WIDTH = 3.2       # px at 1080 wide, middle of a stroke close to the camera
+OUTLINE_TAPER = 0.3       # stroke width at its ends, as a fraction of the middle (brush taper)
+OUTLINE_FAR = (4.0, 18.0, 0.7)    # (near m, far m, width factor at far)
+OUTLINE_VALUE = 0.62      # HSV value multiplier of the object's own colour -> line colour
+OUTLINE_SAT = 1.18        # HSV saturation multiplier (darker tones of a colour are richer, not greyer)
+OUTLINE_OPACITY = 0.9
+
+
 def _lines(scene, px):
-    """Freestyle: dark wobbly, broken outline in its own view layer (in Blender 5.x the strokes also land
-    in the combined image even with as_render_pass, and Kuwahara would smear them into a grey halo)."""
+    """Geometric outline (Freestyle): silhouettes, borders and creases computed from the meshes and the
+    camera, not guessed from pixels, so they are exact, antialiased and stable from frame to frame.
+    Strokes are drawn INSIDE the silhouette, so every line lies on the object it outlines; the
+    compositor uses the stroke only as a mask and colours it with that object's own (lit) colour, darker.
+    Own view layer: in Blender 5.x Freestyle strokes also land in the layer's combined image."""
     scene.render.use_freestyle = True
     scene.render.line_thickness_mode = "ABSOLUTE"
     scene.render.line_thickness = 1.0
     scene.view_layers[0].use_freestyle = False
     vl = scene.view_layers.get(LINES_LAYER) or scene.view_layers.new(LINES_LAYER)
     vl.use_freestyle = True
+    vl.samples = 1                                   # only the stroke pass of this layer is used
     fs = vl.freestyle_settings
     fs.as_render_pass = True
-    fs.crease_angle = 2.4  # radians (~137 deg): only real corners
+    fs.crease_angle = 2.4                            # radians (~137 deg): real corners only, not smooth shading
     ls = fs.linesets[0] if len(fs.linesets) else fs.linesets.new("toon")
     ls.select_by_visibility = True
     ls.visibility = "VISIBLE"
@@ -284,29 +298,34 @@ def _lines(scene, px):
     if ls.linestyle is None:
         ls.linestyle = bpy.data.linestyles.new("toon_line")
     st = ls.linestyle
-    st.color = LINE
-    st.thickness = 2.7 * px
-    st.thickness_position = "CENTER"
+    st.color = (1.0, 1.0, 1.0)                       # mask only; the colour is made in the compositor
+    st.alpha = 1.0
+    st.thickness = OUTLINE_WIDTH * px
+    st.thickness_position = "INSIDE"                 # on the object it outlines, never on the background
     st.caps = "ROUND"
     st.use_chaining = True
     st.chaining = "PLAIN"
-    st.use_dashed_line = True                       # breaks: long dashes, short gaps
-    st.dash1, st.gap1 = int(380 * px), int(7 * px)
-    st.dash2, st.gap2 = int(230 * px), int(12 * px)
-    st.dash3, st.gap3 = int(520 * px), int(5 * px)
-    for coll in (st.thickness_modifiers, st.alpha_modifiers, st.geometry_modifiers):
+    st.use_same_object = True                        # a stroke never runs from one object onto another
+    st.use_dashed_line = False
+    for coll in (st.thickness_modifiers, st.alpha_modifiers, st.geometry_modifiers, st.color_modifiers):
         for mod in list(coll):
             coll.remove(mod)
-    g = st.geometry_modifiers.new("wobble", "PERLIN_NOISE_1D")
-    g.frequency, g.amplitude, g.octaves = 6.0, 1.6 * px, 2
-    g2 = st.geometry_modifiers.new("drift", "PERLIN_NOISE_1D")
-    g2.frequency, g2.amplitude, g2.octaves = 0.6, 2.2 * px, 1
-    t = st.thickness_modifiers.new("pressure", "NOISE")
-    t.amplitude, t.period, t.blend = 0.6 * px, 60.0, "ADD"
-    t.use_asymmetric = True
-    # No alpha modifiers: semi-transparent strokes turn into a speckled halo, alpha NOISE erases the stroke.
+    # brush taper: thin at both ends, full in the middle (smooth curve along the stroke)
+    tp = st.thickness_modifiers.new("taper", "ALONG_STROKE")
+    tp.mapping, tp.blend = "CURVE", "MULTIPLY"
+    cm = tp.curve
+    pts = cm.curves[0].points
+    pts[0].location = (0.0, OUTLINE_TAPER)
+    pts[1].location = (1.0, OUTLINE_TAPER)
+    pts.new(0.18, 1.0)
+    pts.new(0.82, 1.0)
+    for p in pts:
+        p.handle_type = "AUTO"
+    cm.update()
+    # constant on screen up close, thinner further away (perspective, not a blur)
     d = st.thickness_modifiers.new("depth", "DISTANCE_FROM_CAMERA")
-    d.range_min, d.range_max, d.value_min, d.value_max, d.blend = 5.0, 18.0, 1.0, 0.5, "MULTIPLY"
+    d.range_min, d.range_max = OUTLINE_FAR[0], OUTLINE_FAR[1]
+    d.value_min, d.value_max, d.blend = 1.0, OUTLINE_FAR[2], "MULTIPLY"
 
 
 def _overlay_layer(scene):
@@ -488,7 +507,7 @@ def _finish(g, color, grain=0.07, streaks=0.012, speckle=0.02, vignette=0.14):
     return g.mix(1.0, color, f, "MULTIPLY")
 
 
-def _comp(scene, px, kuwahara=7, glare=True, overlay=None, lines="sobel", haze=(6.0, 20.0, 0.4),
+def _comp(scene, px, kuwahara=7, glare=True, overlay=None, lines="object", haze=(6.0, 20.0, 0.4),
           haze_color="#a78b85", boil=0, finish=True):
     """Compositor: Kuwahara, lines, depth haze, glow overlay, lamp glare, paper finish."""
     ng = bpy.data.node_groups.new("toon_comp", "CompositorNodeTree")
@@ -507,6 +526,18 @@ def _comp(scene, px, kuwahara=7, glare=True, overlay=None, lines="sobel", haze=(
     last = kw.outputs[0]
     if lines == "sobel":
         last = _sobel_lines(g, last)
+    elif lines == "object":
+        # stroke mask from the geometric outline layer; colour = the object's own pixel (before the
+        # painterly filter, so it is exactly that object's lit colour), darker and a little richer in HSV
+        lrl = N.new("CompositorNodeRLayers")
+        lrl.layer = LINES_LAYER
+        sep = N.new("CompositorNodeSeparateColor")
+        L.new(lrl.outputs["Freestyle"], sep.inputs["Image"])
+        hs = N.new("CompositorNodeHueSat")
+        L.new(rl.outputs["Image"], hs.inputs["Image"])
+        hs.inputs["Saturation"].default_value = OUTLINE_SAT
+        hs.inputs["Value"].default_value = OUTLINE_VALUE
+        last = g.mix(g.math("MULTIPLY", sep.outputs["Alpha"], OUTLINE_OPACITY), last, hs.outputs[0])
     if haze:
         last = g.mix(g.mrange(rl.outputs["Depth"], haze[0], haze[1], 0.0, haze[2], smooth=True),
                      last, lin(haze_color))
@@ -526,13 +557,6 @@ def _comp(scene, px, kuwahara=7, glare=True, overlay=None, lines="sobel", haze=(
         _set_in(gl, ["Size"], 0.85)
         L.new(last, gl.inputs["Image"])
         last = gl.outputs[0]
-    if lines == "freestyle":
-        lrl = N.new("CompositorNodeRLayers")
-        lrl.layer = LINES_LAYER
-        ao = N.new("CompositorNodeAlphaOver")
-        L.new(last, ao.inputs["Background"])
-        L.new(lrl.outputs["Freestyle"], ao.inputs["Foreground"])
-        last = ao.outputs[0]
     if finish:
         last = _finish(g, last)
     out = N.new("NodeGroupOutput")
@@ -540,14 +564,15 @@ def _comp(scene, px, kuwahara=7, glare=True, overlay=None, lines="sobel", haze=(
     return ng
 
 
-def setup(scene=None, world="#8f7c8c", world_strength=1.0, kuwahara=7, glare=True, lines="sobel",
+def setup(scene=None, world="#8f7c8c", world_strength=1.0, kuwahara=7, glare=True, lines="object",
           haze=(6.0, 20.0, 0.4), haze_color="#a78b85", boil=2, finish=True):
     """Colour management, world light, lines and the compositor.
     world: flat world colour, or None to keep the scene's world (e.g. s3d's HDRI sky).
-    lines: "sobel" (default) = edges from depth/normal passes, a darker shade of the pixel underneath;
-           "freestyle" = dark hand-drawn strokes (separate view layer); None = no lines.
+    lines: "object" (default) = geometric outline from the meshes (silhouettes, borders, creases), drawn
+           inside each object in a darker tone of that object's own colour (OUTLINE_* constants);
+           "sobel" = screen-space edges from the depth/normal passes (sketchier, cheaper); None = no lines.
     haze: (from m, to m, max mix) towards haze_color, or None.
-    boil: line noise changes every `boil` frames in an animation (0 = fixed)."""
+    boil: sobel line noise changes every `boil` frames in an animation (0 = fixed)."""
     scene = scene or bpy.context.scene
     px = scene.render.resolution_x * scene.render.resolution_percentage / 100 / 1080
     vs = scene.view_settings
@@ -564,11 +589,11 @@ def setup(scene=None, world="#8f7c8c", world_strength=1.0, kuwahara=7, glare=Tru
             nt.links.remove(lk)
         bg.inputs["Color"].default_value = lin(world)
         bg.inputs["Strength"].default_value = world_strength
-    scene.render.use_freestyle = lines == "freestyle"
+    scene.render.use_freestyle = lines == "object"
     vl = scene.view_layers[0]
     vl.use_pass_z = True
     vl.use_pass_normal = True
-    if lines == "freestyle":
+    if lines == "object":
         _lines(scene, px)
     return _comp(scene, px, kuwahara, glare, _overlay_layer(scene), lines, haze, haze_color, boil, finish)
 
